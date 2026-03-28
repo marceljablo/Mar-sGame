@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Mar'sGame | Classic Snake - Global Backend</title>
+    <!-- Tailwind CSS + Font Awesome -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * {
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+        .game-canvas {
+            background: linear-gradient(135deg, #1a472a, #0e2a1a);
+            border-radius: 1rem;
+            box-shadow: 0 20px 35px rgba(0,0,0,0.4);
+            touch-action: none;
+            cursor: pointer;
+        }
+        button:active { transform: scale(0.96); transition: 0.05s; }
+        
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 280px;
+            background: rgba(17, 24, 39, 0.98);
+            backdrop-filter: blur(12px);
+            z-index: 1000;
+            transform: translateX(-100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-right: 1px solid rgba(245, 158, 11, 0.3);
+        }
+        .sidebar.open { transform: translateX(0); }
+        .sidebar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+            backdrop-filter: blur(2px);
+        }
+        .warning-popup {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: #1f2937;
+            padding: 12px 24px;
+            border-radius: 50px;
+            font-weight: bold;
+            z-index: 2000;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            animation: slideDown 0.3s ease, fadeOut 0.3s ease 2.7s forwards;
+            pointer-events: none;
+            font-size: 14px;
+        }
+        @keyframes slideDown {
+            from { top: -50px; opacity: 0; }
+            to { top: 20px; opacity: 1; }
+        }
+        @keyframes fadeOut {
+            to { opacity: 0; visibility: hidden; }
+        }
+        .touch-controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            max-width: 250px;
+            margin: 0 auto;
+        }
+        .touch-btn {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(8px);
+            padding: 0.75rem;
+            border-radius: 1rem;
+            font-size: 1.5rem;
+            font-weight: bold;
+            transition: all 0.05s linear;
+        }
+        .touch-btn:active {
+            transform: scale(0.92);
+            background: rgba(245, 158, 11, 0.5);
+        }
+        @media (max-width: 640px) {
+            .touch-controls { max-width: 200px; gap: 0.35rem; }
+            .touch-btn { padding: 0.5rem; font-size: 1.2rem; }
+            .warning-popup { font-size: 12px; padding: 8px 16px; white-space: nowrap; }
+        }
+        .leaderboard-item { transition: background 0.2s; }
+        .copy-btn:active { transform: scale(0.95); }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 to-gray-800 text-gray-100 overflow-x-hidden">
+
+<div id="app">
+    <!-- LOADING SCREEN -->
+    <div v-if="loading" class="fixed inset-0 bg-black/90 z-[9999] flex items-center justify-center">
+        <div class="text-center">
+            <i class="fas fa-spinner fa-spin text-4xl text-amber-400 mb-4"></i>
+            <p class="text-gray-300">Connecting to Mar'sGame Network...</p>
+        </div>
+    </div>
+
+    <!-- LOGIN / REGISTER SECTION -->
+    <div v-else-if="!currentUser" class="min-h-screen flex items-center justify-center px-4 py-8">
+        <div class="bg-gray-800/90 backdrop-blur-sm rounded-2xl shadow-2xl p-6 w-full max-w-md border border-amber-500/30">
+            <div class="flex gap-2 mb-6 border-b border-gray-700">
+                <button @click="authTab = 'login'" :class="['flex-1 py-2 font-semibold transition', authTab === 'login' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-gray-400']">Login</button>
+                <button @click="authTab = 'register'" :class="['flex-1 py-2 font-semibold transition', authTab === 'register' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-gray-400']">Register</button>
+            </div>
+            
+            <div v-if="authTab === 'login'">
+                <div class="text-center mb-4">
+                    <i class="fas fa-gamepad text-4xl text-amber-400 mb-2"></i>
+                    <h2 class="text-2xl font-bold text-amber-400">Welcome Back</h2>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-gray-300 text-sm mb-1"><i class="fas fa-user mr-1"></i>Username</label>
+                        <input v-model="loginUsername" type="text" class="w-full p-3 rounded-xl bg-gray-700 border border-gray-600 focus:border-amber-500 outline-none text-white">
+                    </div>
+                    <div>
+                        <label class="block text-gray-300 text-sm mb-1"><i class="fas fa-lock mr-1"></i>Password</label>
+                        <input v-model="loginPassword" type="password" class="w-full p-3 rounded-xl bg-gray-700 border border-gray-600 focus:border-amber-500 outline-none text-white">
+                    </div>
+                    <button @click="login" class="w-full bg-amber-500 hover:bg-amber-600 py-3 rounded-xl font-bold text-lg transition">Login</button>
+                </div>
+            </div>
+            
+            <div v-if="authTab === 'register'">
+                <div class="text-center mb-4">
+                    <i class="fas fa-user-plus text-4xl text-amber-400 mb-2"></i>
+                    <h2 class="text-2xl font-bold text-amber-400">Create Account</h2>
+                    <p class="text-xs text-gray-400 mt-1">Registration requires admin approval</p>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-gray-300 text-sm mb-1"><i class="fas fa-user mr-1"></i>Username</label>
+                        <input v-model="regUsername" type="text" class="w-full p-3 rounded-xl bg-gray-700 border border-gray-600 focus:border-amber-500 outline-none text-white">
+                    </div>
+                    <div>
+                        <label class="block text-gray-300 text-sm mb-1"><i class="fas fa-lock mr-1"></i>Password</label>
+                        <input v-model="regPassword" type="password" class="w-full p-3 rounded-xl bg-gray-700 border border-gray-600 focus:border-amber-500 outline-none text-white">
+                    </div>
+                    <div>
+                        <label class="block text-gray-300 text-sm mb-1"><i class="fas fa-link mr-1"></i>Affiliate Code (Optional)</label>
+                        <input v-model="regAffiliateCode" type="text" placeholder="Enter invite code" class="w-full p-3 rounded-xl bg-gray-700 border border-gray-600 focus:border-amber-500 outline-none text-white">
+                    </div>
+                    <button @click="register" class="w-full bg-green-600 hover:bg-green-700 py-3 rounded-xl font-bold text-lg transition">Register</button>
+                    <p class="text-center text-xs text-gray-400">After registration, wait for admin approval to login.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP -->
+    <div v-else>
+        <div v-if="showWarning" class="warning-popup"><i class="fas fa-exclamation-triangle mr-2"></i> ⚠️ Finish your current game first!</div>
+        <div v-if="sidebarOpen" class="sidebar-overlay" @click="closeSidebar"></div>
+        
+        <div :class="['sidebar', sidebarOpen ? 'open' : '']">
+            <div class="p-5 border-b border-amber-500/30">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <i class="fas fa-dragon text-amber-400 text-2xl"></i>
+                        <div><h3 class="font-bold">{{ currentUser.username }}</h3><span class="text-xs text-gray-400">{{ currentUser.role === 'admin' ? '👑 Admin' : '🎮 Player' }}</span></div>
+                    </div>
+                    <button @click="closeSidebar" class="text-2xl text-gray-400">&times;</button>
+                </div>
+            </div>
+            <div class="flex-1 py-6 px-4 space-y-2 overflow-y-auto">
+                <button @click="navigateTo('arena')" :class="['w-full flex items-center gap-3 p-3 rounded-xl transition', activeNav === 'arena' ? 'bg-amber-600/30 text-amber-400 border-l-4 border-amber-400' : 'hover:bg-gray-700']"><i class="fas fa-gamepad w-5"></i><span>Game Arena</span></button>
+                <button @click="navigateTo('affiliate')" :class="['w-full flex items-center gap-3 p-3 rounded-xl transition', activeNav === 'affiliate' ? 'bg-amber-600/30 text-amber-400 border-l-4 border-amber-400' : 'hover:bg-gray-700']"><i class="fas fa-link w-5"></i><span>Affiliate Program</span></button>
+                <button @click="navigateTo('leaderboard')" :class="['w-full flex items-center gap-3 p-3 rounded-xl transition', activeNav === 'leaderboard' ? 'bg-amber-600/30 text-amber-400 border-l-4 border-amber-400' : 'hover:bg-gray-700']"><i class="fas fa-trophy w-5"></i><span>Leaderboard</span></button>
+                <button @click="navigateTo('transactions')" :class="['w-full flex items-center gap-3 p-3 rounded-xl transition', activeNav === 'transactions' ? 'bg-amber-600/30 text-amber-400 border-l-4 border-amber-400' : 'hover:bg-gray-700']"><i class="fas fa-history w-5"></i><span>Transactions</span></button>
+                <button @click="navigateTo('withdraw')" :class="['w-full flex items-center gap-3 p-3 rounded-xl transition', activeNav === 'withdraw' ? 'bg-amber-600/30 text-amber-400 border-l-4 border-amber-400' : 'hover:bg-gray-700']"><i class="fas fa-hand-holding-usd w-5"></i><span>Withdraw</span></button>
+                <div class="pt-6 mt-4 border-t border-gray-700"><button @click="logout" class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-red-600/20 text-red-400 transition"><i class="fas fa-sign-out-alt w-5"></i><span>Logout</span></button></div>
+            </div>
+        </div>
+
+        <header class="bg-gray-800/95 backdrop-blur-md shadow-lg sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 py-3">
+                <div class="flex items-center justify-between gap-3">
+                    <button @click="openSidebar" class="md:hidden bg-gray-700 p-2 rounded-full"><i class="fas fa-bars text-xl"></i></button>
+                    <div class="flex items-center gap-3"><i class="fas fa-dragon text-amber-400 text-2xl hidden md:block"></i><div><h1 class="font-bold text-lg">Mar'sGame</h1><span class="text-xs text-gray-400 hidden md:inline">{{ currentUser.username }}</span></div></div>
+                    <div class="hidden md:flex items-center gap-1 bg-gray-700/50 rounded-full p-1">
+                        <button @click="navigateTo('arena')" :class="['px-4 py-2 rounded-full text-sm font-medium transition', activeNav === 'arena' ? 'bg-amber-500 text-gray-900' : 'hover:bg-gray-600']"><i class="fas fa-gamepad mr-1"></i> Game</button>
+                        <button @click="navigateTo('affiliate')" :class="['px-4 py-2 rounded-full text-sm font-medium transition', activeNav === 'affiliate' ? 'bg-amber-500 text-gray-900' : 'hover:bg-gray-600']"><i class="fas fa-link mr-1"></i> Affiliate</button>
+                        <button @click="navigateTo('leaderboard')" :class="['px-4 py-2 rounded-full text-sm font-medium transition', activeNav === 'leaderboard' ? 'bg-amber-500 text-gray-900' : 'hover:bg-gray-600']"><i class="fas fa-trophy mr-1"></i> Leaderboard</button>
+                        <button @click="navigateTo('transactions')" :class="['px-4 py-2 rounded-full text-sm font-medium transition', activeNav === 'transactions' ? 'bg-amber-500 text-gray-900' : 'hover:bg-gray-600']"><i class="fas fa-history mr-1"></i> History</button>
+                        <button @click="navigateTo('withdraw')" :class="['px-4 py-2 rounded-full text-sm font-medium transition', activeNav === 'withdraw' ? 'bg-amber-500 text-gray-900' : 'hover:bg-gray-600']"><i class="fas fa-hand-holding-usd mr-1"></i> Withdraw</button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="bg-gray-700 rounded-full px-2 py-1 md:px-3 text-xs md:text-sm"><i class="fas fa-heart text-red-400 mr-1"></i> {{ userLives }}</div>
+                        <div class="bg-gray-700 rounded-full px-2 py-1 md:px-3 text-xs md:text-sm"><i class="fas fa-coins text-amber-400 mr-1"></i> ₱{{ userBalance.toFixed(2) }}</div>
+                        <button @click="logout" class="bg-red-600/70 hover:bg-red-600 px-2 py-1 md:px-3 rounded-full text-xs md:text-sm hidden md:block"><i class="fas fa-sign-out-alt"></i></button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div v-if="floatingMessage" class="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-md z-40 bg-amber-500/90 text-gray-900 p-3 rounded-xl shadow-lg">
+            <span><i class="fas fa-bullhorn mr-2"></i> {{ floatingMessage }}</span>
+            <button @click="dismissFloatingMsg" class="float-right font-bold">&times;</button>
+        </div>
+
+        <main class="max-w-7xl mx-auto px-3 md:px-4 py-4 md:py-6 pb-24">
+            <!-- GAME ARENA -->
+            <div v-if="activeNav === 'arena'" class="space-y-4 md:space-y-6">
+                <div class="bg-gray-800/90 rounded-2xl p-4 md:p-5 shadow-xl">
+                    <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+                        <div><h2 class="text-xl md:text-2xl font-bold"><i class="fas fa-snake text-green-400"></i> Classic Snake</h2><p class="text-xs text-gray-400">Swipe or use arrows to control!</p></div>
+                        <div class="flex gap-3"><div class="text-center"><p class="text-xs text-gray-400">Time Left</p><p class="text-xl md:text-2xl font-mono text-amber-400">{{ gameTimeLeft }}s</p></div><div class="text-center"><p class="text-xs text-gray-400">Score</p><p class="text-xl md:text-2xl font-bold">{{ currentGameScore }}</p></div></div>
+                    </div>
+                    <div class="flex justify-center relative"><canvas id="snakeCanvas" width="450" height="450" class="game-canvas w-full max-w-[450px] aspect-square"></canvas></div>
+                    <div class="mt-4"><div class="touch-controls"><div></div><button @click="moveSnake('up')" :disabled="!isGameActive" class="touch-btn"><i class="fas fa-arrow-up"></i></button><div></div><button @click="moveSnake('left')" :disabled="!isGameActive" class="touch-btn"><i class="fas fa-arrow-left"></i></button><button @click="moveSnake('down')" :disabled="!isGameActive" class="touch-btn"><i class="fas fa-arrow-down"></i></button><button @click="moveSnake('right')" :disabled="!isGameActive" class="touch-btn"><i class="fas fa-arrow-right"></i></button></div><p class="text-center text-xs text-gray-400 mt-2">⬆️ Swipe on game area | Arrow Keys / WASD for keyboard</p></div>
+                    <div class="flex flex-col md:flex-row gap-3 mt-4"><button @click="startSnakeGame" :disabled="isGameActive || userLives <= 0" class="flex-1 bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-bold disabled:opacity-50"><i class="fas fa-play mr-2"></i> Start Game (Cost: 1 Live)</button><button @click="buyLives" class="flex-1 bg-green-600 hover:bg-green-700 py-3 rounded-xl font-bold"><i class="fas fa-heart mr-2"></i> Buy 1 Life (₱1)</button></div>
+                    <div class="mt-3 text-center"><button @click="claimDailyFreeLives" :disabled="dailyFreeClaimed" class="text-xs md:text-sm bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 rounded-lg disabled:opacity-50"><i class="fas fa-gift mr-1"></i> {{ dailyFreeClaimed ? 'Daily Free Claimed' : 'Claim 3 Free Lives' }}</button></div>
+                    <div v-if="userLives <= 0 && !isGameActive" class="mt-3 bg-red-900/50 p-2 rounded-lg text-center text-xs">💀 No lives left! Buy lives (₱1 each) or claim daily 3 free lives.</div>
+                </div>
+                <div class="bg-gray-800/90 rounded-2xl p-4 md:p-5"><div class="flex justify-between items-center flex-wrap mb-3"><h3 class="text-lg md:text-xl font-bold"><i class="fas fa-trophy text-yellow-400 mr-2"></i>🏆 Leaderboard</h3><span class="text-xs bg-gray-700 px-2 py-1 rounded-full">Next Reset: {{ nextResetTime }}</span></div><div class="max-h-48 md:max-h-64 overflow-y-auto"><div v-for="(entry, idx) in leaderboard" :key="idx" class="leaderboard-item flex justify-between py-2 border-b border-gray-700 text-sm md:text-base"><span><span class="font-bold w-6 inline-block">{{ idx+1 }}.</span> {{ entry.username }}</span><span class="font-mono font-bold">{{ entry.score }} pts</span></div><div v-if="leaderboard.length === 0" class="text-center text-gray-400 py-4">No scores yet. Play now!</div></div><div class="bg-gray-900/50 rounded-lg p-2 mt-3 text-xs text-center">💰 Prize Pool: ₱{{ currentPrizePool.toFixed(2) }} — Top 3 winners get paid hourly</div></div>
+            </div>
+
+            <div v-if="activeNav === 'affiliate'" class="bg-gray-800 rounded-2xl p-5"><h2 class="text-xl md:text-2xl font-bold mb-4"><i class="fas fa-link text-amber-400 mr-2"></i>Affiliate Program</h2><div class="bg-gray-700/50 rounded-xl p-4 mb-4"><p class="text-sm text-gray-300 mb-2">Your Affiliate Code:</p><div class="flex gap-2 items-center"><code class="bg-gray-900 px-4 py-2 rounded-lg text-amber-400 font-mono text-lg flex-1 text-center">{{ affiliateCode || 'No code yet' }}</code><button v-if="affiliateCode" @click="copyAffiliateLink" class="bg-amber-600 px-4 py-2 rounded-lg copy-btn"><i class="fas fa-copy"></i> Copy</button></div><p class="text-xs text-gray-400 mt-3">Share your code with friends! When they register with your code, you earn ₱10 bonus!</p></div><div class="bg-gray-700/30 rounded-xl p-4"><h3 class="font-bold mb-2">Affiliate Stats</h3><div class="flex justify-between items-center border-b border-gray-600 py-2"><span>Total Referrals</span><span class="font-bold text-amber-400">{{ affiliateStats.referrals }}</span></div><div class="flex justify-between items-center border-b border-gray-600 py-2"><span>Total Earnings from Referrals</span><span class="font-bold text-green-400">₱{{ affiliateStats.earnings.toFixed(2) }}</span></div><div class="text-xs text-gray-400 mt-3">You earn ₱10 for each approved referral!</div></div></div>
+
+            <div v-if="activeNav === 'leaderboard'" class="bg-gray-800 rounded-2xl p-5"><h2 class="text-xl md:text-2xl font-bold mb-4"><i class="fas fa-trophy text-yellow-400 mr-2"></i>Global Rankings</h2><div class="space-y-2 max-h-96 overflow-y-auto"><div v-for="(entry, idx) in leaderboard" :key="idx" class="flex justify-between items-center py-2 border-b border-gray-700"><div><span class="text-lg font-bold w-8 inline-block">{{ idx+1 }}</span> {{ entry.username }}</div><span class="font-bold">{{ entry.score }} pts</span></div></div></div>
+
+            <div v-if="activeNav === 'transactions'" class="bg-gray-800 rounded-2xl p-5"><h2 class="text-xl md:text-2xl font-bold mb-4">📜 Transaction History</h2><div class="space-y-2 max-h-96 overflow-y-auto"><div v-for="tx in userTransactions.slice().reverse()" :key="tx.id" class="border-b border-gray-700 py-2 text-sm"><div class="flex justify-between flex-wrap"><span>{{ tx.date }}</span><span :class="tx.type.includes('reward') || tx.type.includes('affiliate') ? 'text-green-400' : 'text-red-400'">{{ tx.type.includes('reward') || tx.type.includes('affiliate') ? '+' : '-' }} ₱{{ tx.amount }}</span></div><p class="text-xs text-gray-400">{{ tx.type }} {{ tx.details }}</p></div></div></div>
+
+            <div v-if="activeNav === 'withdraw'" class="bg-gray-800 rounded-2xl p-5"><h2 class="text-xl md:text-2xl font-bold mb-4">💸 Withdraw Funds</h2><div class="bg-gray-700/50 rounded-xl p-4 mb-4 text-center"><p class="text-3xl font-bold text-amber-400">₱{{ userBalance.toFixed(2) }}</p></div><div class="flex gap-3"><input type="number" v-model="withdrawAmount" class="flex-1 bg-gray-700 rounded-xl p-3 text-center" placeholder="Amount"><button @click="requestWithdraw" class="bg-amber-600 px-6 py-3 rounded-xl font-bold">Request</button></div><p class="text-xs text-gray-400 mt-3">Admin approves manually. Balance deducted after approval.</p></div>
+        </main>
+
+        <div v-if="currentUser.role === 'admin'" class="fixed bottom-4 right-4 z-40"><button @click="showAdminPanel = !showAdminPanel" class="bg-red-600 p-3 rounded-full shadow-lg"><i class="fas fa-user-shield text-xl"></i></button></div>
+        
+        <div v-if="showAdminPanel && currentUser.role === 'admin'" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 overflow-y-auto" @click.self="showAdminPanel = false"><div class="bg-gray-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5"><div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold">Admin Panel</h2><button @click="showAdminPanel = false" class="text-2xl">&times;</button></div><div class="space-y-5"><div class="border-b border-gray-700 pb-3"><h3 class="font-bold mb-2 text-amber-400">📝 Pending Approvals ({{ pendingUsers.length }})</h3><div v-for="user in pendingUsers" :key="user.username" class="flex justify-between items-center py-2 border-b border-gray-600"><div><span class="font-medium">{{ user.username }}</span><span class="text-xs text-gray-400 ml-2">Code: {{ user.registeredWithCode || 'none' }}</span></div><div class="flex gap-2"><button @click="approveUser(user.username)" class="bg-green-600 px-3 py-1 rounded text-sm">Approve</button><button @click="rejectUser(user.username)" class="bg-red-600 px-3 py-1 rounded text-sm">Reject</button></div></div><div v-if="pendingUsers.length === 0" class="text-gray-400 text-sm py-2">No pending registrations</div></div><div><h3 class="font-bold mb-2">Create User (Instant)</h3><div class="flex gap-2 flex-wrap"><input v-model="newUserName" placeholder="username" class="bg-gray-700 p-2 rounded flex-1"><input v-model="newUserPass" placeholder="password" class="bg-gray-700 p-2 rounded flex-1"><button @click="adminCreateUser" class="bg-green-600 px-4 rounded">Create</button></div></div><div><h3 class="font-bold mb-2">Add Pesos</h3><div class="flex gap-2"><input v-model="addBalanceUserId" placeholder="username" class="bg-gray-700 p-2 rounded"><input v-model="addBalanceAmount" type="number" placeholder="amount" class="bg-gray-700 p-2 rounded"><button @click="adminAddBalance" class="bg-blue-600 px-4 rounded">Add</button></div></div><div><h3 class="font-bold mb-2">Pending Withdrawals ({{ pendingWithdrawals.length }})</h3><div v-for="wd in pendingWithdrawals" :key="wd.id" class="flex justify-between items-center border-b py-2"><span>{{ wd.username }} - ₱{{ wd.amount }}</span><button @click="approveWithdraw(wd.id)" class="bg-green-500 px-3 py-1 rounded">Approve</button></div></div><div><h3 class="font-bold mb-2">Manage Users (Ban/Delete)</h3><div class="max-h-40 overflow-y-auto"><div v-for="u in approvedUsers" :key="u.username" class="flex justify-between items-center border-b py-1"><span>{{ u.username }} {{ u.banned ? '🔴' : '' }}</span><div><button @click="toggleBan(u.username)" class="bg-red-700 text-xs px-2 py-1 rounded">{{ u.banned ? 'Unban' : 'Ban' }}</button><button @click="deleteUserAccount(u.username)" class="bg-gray-700 text-xs px-2 py-1 rounded ml-1">Delete</button></div></div></div></div><div><h3 class="font-bold mb-2">Broadcast Message</h3><div class="flex gap-2"><input v-model="broadcastMsg" placeholder="Message to all users" class="bg-gray-700 p-2 rounded flex-1"><button @click="sendFloatingMessage" class="bg-amber-600 px-4 rounded">Send</button></div></div></div></div></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/vue@2.7.14/dist/vue.js"></script>
+<script>
+    // Supabase Configuration - Replace with your own Supabase URL and Key
+    // Sign up for free at https://supabase.com
+    const SUPABASE_URL = 'https://your-project.supabase.co';
+    const SUPABASE_ANON_KEY = 'your-anon-key';
+    
+    let supabase = null;
+    let useLocalStorage = true; // Fallback if Supabase fails
+    
+    // Try to initialize Supabase
+    if (typeof supabaseJs !== 'undefined' && SUPABASE_URL !== 'https://your-project.supabase.co') {
+        try {
+            supabase = supabaseJs.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            useLocalStorage = false;
+            console.log('Supabase connected!');
+        } catch(e) { console.log('Supabase init failed, using localStorage'); }
+    }
+    
+    // Database functions (Supabase or localStorage fallback)
+    let users = [], transactions = [], gameRounds = {}, dailyLivesClaim = {}, affiliateReferrals = {};
+    
+    async function loadAllData() {
+        if (!useLocalStorage && supabase) {
+            try {
+                const { data: usersData } = await supabase.from('users').select('*');
+                if (usersData) users = usersData;
+                const { data: txData } = await supabase.from('transactions').select('*');
+                if (txData) transactions = txData;
+                const { data: roundsData } = await supabase.from('game_rounds').select('*').single();
+                if (roundsData) gameRounds = roundsData;
+                const { data: dailyData } = await supabase.from('daily_claims').select('*');
+                if (dailyData) dailyLivesClaim = Object.fromEntries(dailyData.map(d => [d.username, d.last_claim]));
+                const { data: affData } = await supabase.from('affiliate_referrals').select('*');
+                if (affData) affiliateReferrals = affData.reduce((acc, r) => { acc[r.referrer] = r.referrals || []; return acc; }, {});
+            } catch(e) { console.log('Supabase fetch failed, using localStorage'); useLocalStorage = true; }
+        }
+        if (useLocalStorage || !supabase) {
+            users = JSON.parse(localStorage.getItem('marsgame_users')) || [];
+            transactions = JSON.parse(localStorage.getItem('marsgame_tx')) || [];
+            gameRounds = JSON.parse(localStorage.getItem('marsgame_rounds')) || { currentScores: {}, prizePool: 0, roundEnd: Date.now() + 3600000 };
+            dailyLivesClaim = JSON.parse(localStorage.getItem('marsgame_daily_claim')) || {};
+            affiliateReferrals = JSON.parse(localStorage.getItem('marsgame_affiliate')) || {};
+        }
+        if(!users.find(u=>u.username==='admin')) users.push({ username:'admin', password:'admin123', role:'admin', balance:0, totalEarn:0, banned:false, lives:5, affiliateCode:'ADMIN2024', approved:true });
+        saveAllData();
+    }
+    
+    async function saveAllData() {
+        if (!useLocalStorage && supabase) {
+            try {
+                await supabase.from('users').upsert(users);
+                await supabase.from('transactions').upsert(transactions);
+                await supabase.from('game_rounds').upsert([gameRounds]);
+                const dailyArray = Object.entries(dailyLivesClaim).map(([username, last_claim]) => ({ username, last_claim }));
+                await supabase.from('daily_claims').upsert(dailyArray);
+            } catch(e) { console.log('Supabase save failed'); }
+        }
+        if (useLocalStorage || !supabase) {
+            localStorage.setItem('marsgame_users', JSON.stringify(users));
+            localStorage.setItem('marsgame_tx', JSON.stringify(transactions));
+            localStorage.setItem('marsgame_rounds', JSON.stringify(gameRounds));
+            localStorage.setItem('marsgame_daily_claim', JSON.stringify(dailyLivesClaim));
+            localStorage.setItem('marsgame_affiliate', JSON.stringify(affiliateReferrals));
+        }
+    }
+    
+    function addTransaction(username, type, amount, details='') { 
+        transactions.push({ id: Date.now(), username, type, amount, date: new Date().toLocaleString(), details }); 
+        saveAllData(); 
+    }
+    function addAdminEarnings(amount) { let admin = users.find(u=>u.username==='admin'); if(admin) admin.balance += amount; saveAllData(); }
+    
+    function checkAndProcessRoundEnd() {
+        let now = Date.now();
+        if(now >= gameRounds.roundEnd) {
+            let scores = Object.entries(gameRounds.currentScores).map(([u,s])=>({username: u, score: s})).sort((a,b)=>b.score-a.score);
+            let pool = gameRounds.prizePool;
+            if(pool > 0 && scores.length) {
+                let rewards = [0.5, 0.3, 0.2];
+                for(let i=0; i<Math.min(3, scores.length); i++) {
+                    let reward = pool * rewards[i];
+                    let u = users.find(u=>u.username === scores[i].username);
+                    if(u && !u.banned && u.approved) { u.balance += reward; u.totalEarn = (u.totalEarn||0) + reward; addTransaction(scores[i].username, 'game_reward', reward, `Rank ${i+1}`); }
+                }
+            }
+            gameRounds.currentScores = {}; gameRounds.prizePool = 0; gameRounds.roundEnd = Date.now() + 3600000; saveAllData();
+        }
+    }
+    
+    // Vue App (same as before but with Supabase integration)
+    new Vue({
+        el: '#app',
+        data: {
+            loading: true, currentUser: null, loginUsername: '', loginPassword: '', authTab: 'login',
+            regUsername: '', regPassword: '', regAffiliateCode: '', userBalance: 0, userLives: 5,
+            userStats: { totalEarn:0 }, dailyFreeClaimed: false, affiliateCode: '', affiliateStats: { referrals: 0, earnings: 0 },
+            activeNav: 'arena', sidebarOpen: false, showAdminPanel: false, isGameActive: false,
+            gameTimeLeft: 60, currentGameScore: 0, gameTimer: null, leaderboard: [], nextResetTime: '',
+            currentPrizePool: 0, userTransactions: [], withdrawAmount: 0, allUsers: [], pendingUsers: [],
+            approvedUsers: [], pendingWithdrawals: [], newUserName:'', newUserPass:'', addBalanceUserId:'',
+            addBalanceAmount:0, broadcastMsg:'', floatingMessage: null, showWarning: false, warningTimeout: null,
+            snakeCanvas: null, ctx: null, snake: [], food: {}, direction: 'right', nextDirection: 'right',
+            gameLoop: null, cellSize: 22.5, gridSize: 20, touchStartX: 0, touchStartY: 0
+        },
+        async mounted() {
+            await loadAllData();
+            this.loading = false;
+            setInterval(()=>{ if(this.currentUser) this.refreshUserData(); checkAndProcessRoundEnd(); this.updateLeaderboard(); this.updateNextReset(); }, 2000);
+            let storedMsg = localStorage.getItem('marsgame_floating');
+            if(storedMsg) { let m = JSON.parse(storedMsg); if(Date.now() - m.timestamp < 3600000) this.floatingMessage = m.text; else localStorage.removeItem('marsgame_floating'); }
+            window.addEventListener('keydown', this.handleKeyPress);
+            this.initSwipeControls();
+        },
+        methods: {
+            initSwipeControls() { setTimeout(() => { const canvas = document.getElementById('snakeCanvas'); if(!canvas) return; canvas.addEventListener('touchstart', (e) => { e.preventDefault(); this.touchStartX = e.touches[0].clientX; this.touchStartY = e.touches[0].clientY; }); canvas.addEventListener('touchend', (e) => { e.preventDefault(); if(!this.isGameActive) return; const dx = e.changedTouches[0].clientX - this.touchStartX; const dy = e.changedTouches[0].clientY - this.touchStartY; if(Math.abs(dx) < 20 && Math.abs(dy) < 20) return; if(Math.abs(dx) > Math.abs(dy)) { if(dx > 0) this.moveSnake('right'); else this.moveSnake('left'); } else { if(dy > 0) this.moveSnake('down'); else this.moveSnake('up'); } }); }, 100); },
+            openSidebar() { this.sidebarOpen = true; }, closeSidebar() { this.sidebarOpen = false; },
+            showWarningPopup() { this.showWarning = true; if(this.warningTimeout) clearTimeout(this.warningTimeout); this.warningTimeout = setTimeout(() => { this.showWarning = false; }, 3000); },
+            navigateTo(tab) { if(this.isGameActive) { this.showWarningPopup(); return; } this.activeNav = tab; this.closeSidebar(); },
+            async register() { if(!this.regUsername || !this.regPassword) { alert('Username and password required'); return; } if(users.find(u=>u.username === this.regUsername)) { alert('Username already exists'); return; } users.push({ username:this.regUsername, password:this.regPassword, role:'user', balance:0, totalEarn:0, banned:false, lives:5, affiliateCode:'', approved:false, registeredWithCode:this.regAffiliateCode || null }); await saveAllData(); alert('Registration submitted! Wait for admin approval.'); this.regUsername = ''; this.regPassword = ''; this.regAffiliateCode = ''; },
+            login() { let user = users.find(u=>u.username === this.loginUsername && u.password === this.loginPassword); if(!user) { alert('Invalid credentials'); return; } if(user.banned) { alert('Your account is banned'); return; } if(!user.approved && user.role !== 'admin') { alert('Your account is pending admin approval'); return; } this.currentUser = {...user}; this.refreshUserData(); this.loadAdminData(); this.loadAffiliateStats(); },
+            logout() { this.currentUser = null; if(this.gameTimer) clearInterval(this.gameTimer); if(this.gameLoop) clearInterval(this.gameLoop); this.isGameActive = false; },
+            refreshUserData() { let f = users.find(u=>u.username === this.currentUser.username); if(f) { this.userBalance=f.balance; this.userLives=f.lives; this.userStats.totalEarn=f.totalEarn||0; this.affiliateCode=f.affiliateCode || this.generateAffiliateCode(f.username); this.currentUser=f; this.checkDaily(); if(!f.affiliateCode) { f.affiliateCode = this.affiliateCode; saveAllData(); } } this.userTransactions = transactions.filter(t=>t.username === this.currentUser.username); if(this.currentUser.role==='admin') this.loadAdminData(); },
+            generateAffiliateCode(username) { return username.toUpperCase().substring(0,4) + Math.random().toString(36).substring(2,6).toUpperCase(); },
+            loadAffiliateStats() { let referrals = affiliateReferrals[this.currentUser?.username] || []; this.affiliateStats.referrals = referrals.length; let earnings = transactions.filter(t => t.username === this.currentUser?.username && t.type === 'affiliate_commission').reduce((sum, t) => sum + t.amount, 0); this.affiliateStats.earnings = earnings; },
+            checkDaily() { let last = dailyLivesClaim[this.currentUser.username]; this.dailyFreeClaimed = (last === new Date().toDateString()); },
+            async claimDailyFreeLives() { if(this.dailyFreeClaimed) { alert('Already claimed today!'); return; } let u = users.find(u=>u.username===this.currentUser.username); if(u) { u.lives += 3; dailyLivesClaim[this.currentUser.username] = new Date().toDateString(); await saveAllData(); this.refreshUserData(); alert('+3 Free Lives!'); } },
+            async buyLives() { if(this.userBalance >= 1) { let u = users.find(u=>u.username===this.currentUser.username); if(u) { u.balance -= 1; u.lives += 1; await saveAllData(); addTransaction(this.currentUser.username, 'buy_life', -1, '1 life'); this.refreshUserData(); alert('+1 Life!'); } } else alert('Insufficient balance (₱1 per life)'); },
+            copyAffiliateLink() { let link = `${window.location.origin}?ref=${this.affiliateCode}`; navigator.clipboard.writeText(link); alert('Affiliate link copied!'); },
+            startSnakeGame() { if(this.isGameActive) return; if(this.userLives <= 0) { alert('No lives! Buy or claim daily free.'); return; } let u = users.find(u=>u.username===this.currentUser.username); if(u) { u.lives--; saveAllData(); this.userLives = u.lives; } this.isGameActive = true; this.currentGameScore = 0; this.gameTimeLeft = 60; this.initSnakeGame(); if(this.gameTimer) clearInterval(this.gameTimer); this.gameTimer = setInterval(()=>{ if(this.gameTimeLeft<=1) this.endSnakeGame(); else this.gameTimeLeft--; }, 1000); },
+            initSnakeGame() { let canvas = document.getElementById('snakeCanvas'); if(!canvas) return; this.cellSize = canvas.width / this.gridSize; this.snake = [{x:10, y:10}, {x:9, y:10}, {x:8, y:10}]; this.direction = 'right'; this.nextDirection = 'right'; this.generateFood(); if(this.gameLoop) clearInterval(this.gameLoop); this.gameLoop = setInterval(() => this.updateSnakeGame(), 120); this.drawSnakeCanvas(); },
+            generateFood() { let maxAttempts = 2000; for(let i=0; i<maxAttempts; i++) { let randX = Math.floor(Math.random() * this.gridSize); let randY = Math.floor(Math.random() * this.gridSize); if(!this.snake.some(segment => segment.x === randX && segment.y === randY)) { this.food = {x: randX, y: randY}; return; } } for(let y=0; y<this.gridSize; y++) { for(let x=0; x<this.gridSize; x++) { if(!this.snake.some(s => s.x === x && s.y === y)) { this.food = {x, y}; return; } } } },
+            updateSnakeGame() { if(!this.isGameActive) return; this.direction = this.nextDirection; let newHead = {...this.snake[0]}; switch(this.direction) { case 'up': newHead.y--; break; case 'down': newHead.y++; break; case 'left': newHead.x--; break; case 'right': newHead.x++; break; } let willEat = (newHead.x === this.food.x && newHead.y === this.food.y); this.snake.unshift(newHead); if(!willEat) this.snake.pop(); else { this.currentGameScore++; this.generateFood(); } if(newHead.x < 0 || newHead.x >= this.gridSize || newHead.y < 0 || newHead.y >= this.gridSize || this.snake.slice(1).some(s => s.x === newHead.x && s.y === newHead.y)) { this.endSnakeGame(); return; } this.drawSnakeCanvas(); },
+            moveSnake(dir) { if(this.isGameActive) this.nextDirection = dir; },
+            handleKeyPress(e) { if(!this.isGameActive) return; const key = e.key; if(key === 'ArrowUp' || key === 'w') this.moveSnake('up'); else if(key === 'ArrowDown' || key === 's') this.moveSnake('down'); else if(key === 'ArrowLeft' || key === 'a') this.moveSnake('left'); else if(key === 'ArrowRight' || key === 'd') this.moveSnake('right'); },
+            drawSnakeCanvas() { let canvas = document.getElementById('snakeCanvas'); if(!canvas) return; let ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height); this.snake.forEach((seg, i) => { ctx.fillStyle = i === 0 ? '#fbbf24' : '#22c55e'; ctx.fillRect(seg.x * this.cellSize, seg.y * this.cellSize, this.cellSize-1, this.cellSize-1); }); ctx.fillStyle = '#ef4444'; ctx.fillRect(this.food.x * this.cellSize, this.food.y * this.cellSize, this.cellSize-1, this.cellSize-1); ctx.fillStyle = '#ffffff'; ctx.font = `${this.cellSize*0.5}px Arial`; ctx.fillText('🍎', this.food.x * this.cellSize + 3, this.food.y * this.cellSize + this.cellSize-5); },
+            async endSnakeGame() { this.isGameActive = false; clearInterval(this.gameTimer); if(this.gameLoop) clearInterval(this.gameLoop); let finalScore = this.currentGameScore; let username = this.currentUser.username; let entryFee = 5; let adminCut = entryFee * 0.2; let poolAdd = entryFee - adminCut; gameRounds.prizePool += poolAdd; addAdminEarnings(adminCut); if(!gameRounds.currentScores[username]) gameRounds.currentScores[username] = 0; gameRounds.currentScores[username] = Math.max(gameRounds.currentScores[username], finalScore); await saveAllData(); addTransaction(username, 'game_entry', -entryFee, `Score ${finalScore}`); this.refreshUserData(); this.updateLeaderboard(); alert(`Game Over! Score: ${finalScore} points!`); },
+            updateLeaderboard() { let scores = Object.entries(gameRounds.currentScores).map(([u,s])=>({username: u, score: s})).sort((a,b)=>b.score-a.score); this.leaderboard = scores; this.currentPrizePool = gameRounds.prizePool; },
+            updateNextReset() { let diff = gameRounds.roundEnd - Date.now(); let m = Math.floor(diff/60000); let s = Math.floor((diff%60000)/1000); this.nextResetTime = `${m}m ${s}s`; },
+            requestWithdraw() { if(this.withdrawAmount>0 && this.userBalance>=this.withdrawAmount) { addTransaction(this.currentUser.username, 'withdraw_request', this.withdrawAmount, 'pending'); alert('Request sent.'); this.refreshUserData(); } else alert('Invalid'); },
+            loadAdminData() { this.allUsers = [...users]; this.pendingUsers = users.filter(u => u.role === 'user' && !u.approved); this.approvedUsers = users.filter(u => u.role === 'user' && u.approved && u.username !== 'admin'); this.pendingWithdrawals = transactions.filter(t=>t.type==='withdraw_request' && !t.approved).map(t=>({id:t.id, username:t.username, amount:t.amount})); },
+            async approveUser(username) { let u = users.find(u=>u.username === username); if(u) { u.approved = true; u.affiliateCode = this.generateAffiliateCode(username); await saveAllData(); if(u.registeredWithCode) { let referrer = users.find(r => r.affiliateCode === u.registeredWithCode); if(referrer && referrer.approved) { let commission = 10; referrer.balance += commission; referrer.totalEarn = (referrer.totalEarn || 0) + commission; addTransaction(referrer.username, 'affiliate_commission', commission, `Referral: ${username}`); if(!affiliateReferrals[referrer.username]) affiliateReferrals[referrer.username] = []; affiliateReferrals[referrer.username].push(username); await saveAllData(); } } this.loadAdminData(); alert(`User ${username} approved!`); } },
+            async rejectUser(username) { users = users.filter(u => u.username !== username); await saveAllData(); this.loadAdminData(); alert(`User ${username} rejected.`); },
+            async adminCreateUser() { if(this.newUserName && this.newUserPass && !users.find(u=>u.username===this.newUserName)) { users.push({ username:this.newUserName, password:this.newUserPass, role:'user', balance:0, totalEarn:0, banned:false, lives:5, affiliateCode:this.generateAffiliateCode(this.newUserName), approved:true }); await saveAllData(); this.loadAdminData(); alert('User created'); } },
+            async adminAddBalance() { let t = users.find(u=>u.username===this.addBalanceUserId); if(t && this.addBalanceAmount>0 && t.approved) { t.balance += parseFloat(this.addBalanceAmount); t.totalEarn += parseFloat(this.addBalanceAmount); await saveAllData(); addTransaction(this.addBalanceUserId, 'admin_add', parseFloat(this.addBalanceAmount), ''); this.refreshUserData(); alert('Added'); } },
+            async approveWithdraw(id) { let tx = transactions.find(t=>t.id===id); if(tx && tx.type==='withdraw_request' && !tx.approved) { let u = users.find(u=>u.username===tx.username); if(u && u.balance >= tx.amount) { u.balance -= tx.amount; tx.approved = true; tx.type = 'withdraw_approved'; await saveAllData(); this.loadAdminData(); this.refreshUserData(); alert('Approved'); } } },
+            async toggleBan(username) { let u = users.find(u=>u.username===username); if(u) { u.banned = !u.banned; await saveAllData(); this.loadAdminData(); if(this.currentUser?.username===username && u.banned) this.logout(); } },
+            async deleteUserAccount(username) { users = users.filter(u=>u.username!==username); transactions = transactions.filter(t=>t.username!==username); await saveAllData(); this.loadAdminData(); if(this.currentUser?.username===username) this.logout(); },
+            sendFloatingMessage() { if(this.broadcastMsg) { this.floatingMessage = this.broadcastMsg; localStorage.setItem('marsgame_floating', JSON.stringify({text: this.broadcastMsg, timestamp: Date.now()})); this.broadcastMsg = ''; alert('Sent'); } },
+            dismissFloatingMsg() { this.floatingMessage = null; localStorage.removeItem('marsgame_floating'); }
+        }
+    });
+    setInterval(()=>{ checkAndProcessRoundEnd(); }, 10000);
+</script>
+</body>
+</html>
